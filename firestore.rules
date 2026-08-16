@@ -33,6 +33,11 @@ service cloud.firestore {
       match /files/{fileId} {
         allow read: if true;
         allow write: if isTeacher();
+
+        match /chunks/{chunkId} {
+          allow read: if true;
+          allow write: if isTeacher();
+        }
       }
     }
 
@@ -40,6 +45,11 @@ service cloud.firestore {
     match /file_contents/{fileId} {
       allow read: if true;
       allow write: if isTeacher();
+
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isTeacher();
+      }
     }
 
     // Reglas para la lista de alumnos (Solo Admins pueden modificar)

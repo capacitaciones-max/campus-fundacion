@@ -15,6 +15,11 @@ export interface ModuleFile {
   url: string;
   type: FileType;
   uploadedAt: string;
+  size?: number;
+  mimeType?: string;
+  isChunked?: boolean;
+  totalChunks?: number;
+  isExternalLink?: boolean;
 }
 
 export interface ForumPost {
