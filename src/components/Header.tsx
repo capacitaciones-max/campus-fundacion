@@ -87,38 +87,32 @@ export default function Header() {
     };
   }, []);
 
-  const handleLogin = async () => {
+  const handleLogin = () => {
     if (isLoggingIn) return;
     
     setIsLoggingIn(true);
-    try {
-      // Detectar si es iOS (iPhone / iPad / iPod) para usar redirect directo ya que Safari bloquea popups frecuentemente
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      
-      const provider = new GoogleAuthProvider();
-      if (isIOS) {
-        console.log("Detectado iOS. Usando signInWithRedirect directamente...");
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      if (error.code === 'auth/cancelled-popup-request') {
-        console.log("Login popup cancelled by user or another request.");
-      } else {
-        console.warn("Popup login failed, attempting redirect login...", error);
-        try {
-          const provider = new GoogleAuthProvider();
-          await signInWithRedirect(auth, provider);
-        } catch (redirectError: any) {
-          console.error("Redirect login error:", redirectError);
-          alert("No se pudo iniciar sesión. Por favor, asegúrate de abrir este enlace en el navegador Safari y no dentro de apps de mensajería.");
+    const provider = new GoogleAuthProvider();
+    
+    // Llamar a signInWithPopup sincrónicamente dentro del evento de clic para evitar bloqueo de popups en iOS/Safari
+    signInWithPopup(auth, provider)
+      .then(() => {
+        setIsLoggingIn(false);
+      })
+      .catch((error: any) => {
+        console.warn("Popup login failed:", error);
+        if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+          setIsLoggingIn(false);
+          return;
         }
-      }
-    } finally {
-      setIsLoggingIn(false);
-    }
+
+        // Si el popup fue bloqueado o falló, intentar redirect como alternativa
+        console.log("Intentando signInWithRedirect como respaldo...");
+        signInWithRedirect(auth, provider).catch((redirectError: any) => {
+          console.error("Redirect login error:", redirectError);
+          setIsLoggingIn(false);
+          alert("Tu navegador bloqueó la ventana de inicio de sesión. Por favor, verifica que las ventanas emergentes estén permitidas en Safari o prueba abriendo el enlace en una pestaña nueva.");
+        });
+      });
   };
 
   const handleLogout = async () => {
