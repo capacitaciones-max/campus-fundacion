@@ -84,6 +84,17 @@ export default function Header() {
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isInIframe = window.self !== window.top;
+
+    if (isIOS && isInIframe) {
+      const confirmOpen = window.confirm("Para iniciar sesión con Google en iPhone sin bloqueos de Safari, abre la aplicación en una pestaña nueva. ¿Deseas abrirla ahora?");
+      if (confirmOpen) {
+        window.open(window.location.href, '_blank');
+      }
+      return;
+    }
     
     setIsLoggingIn(true);
     try {
@@ -92,7 +103,7 @@ export default function Header() {
     } catch (error: any) {
       console.warn("Login failed:", error);
       if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
-        alert("No se pudo iniciar sesión con Google. Por favor, intenta de nuevo.");
+        alert("No se pudo iniciar sesión con Google. Si estás en iPhone, asegúrate de abrir la app directamente en Safari.");
       }
     } finally {
       setIsLoggingIn(false);
