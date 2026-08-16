@@ -1,0 +1,8 @@
+{
+  "name": "Capacitación Fundación Nazareno Crucianelli",
+  "description": "Plataforma de gestión de contenidos para el Curso Introductorio a los Procesos Industriales Primarios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

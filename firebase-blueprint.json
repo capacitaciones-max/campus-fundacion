@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "module": {
+      "title": "Learning Module",
+      "description": "Represents one of the 10 learning modules.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "title", "order"]
+    },
+    "file": {
+      "title": "Module File",
+      "description": "Metadata for files uploaded by teachers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "type": { "type": "string", "enum": ["pdf", "presentation", "video", "other"] },
+        "uploadedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "moduleId", "name", "url", "type"]
+    },
+    "forumPost": {
+      "title": "Forum Post",
+      "description": "A question or consultation in the forum.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "author": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "author", "content"]
+    },
+    "student": {
+      "title": "Student",
+      "description": "An authorized student email.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "addedAt": { "type": "string", "format": "date-time" },
+        "addedBy": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "teacher": {
+      "title": "Teacher",
+      "description": "An authorized teacher or instructor email.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "addedAt": { "type": "string", "format": "date-time" },
+        "addedBy": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "userProgress": {
+      "title": "User Progress",
+      "description": "Tracking completed modules per user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "completedModules": { "type": "array", "items": { "type": "string" } },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "completedModules"]
+    }
+  },
+  "firestore": {
+    "/modules/{moduleId}": {
+      "schema": "module",
+      "description": "Master list of learning modules."
+    },
+    "/modules/{moduleId}/files/{fileId}": {
+      "schema": "file",
+      "description": "Files associated with a specific module."
+    },
+    "/forum/{postId}": {
+      "schema": "forumPost",
+      "description": "Forum questions and discussions."
+    },
+    "/students/{email}": {
+      "schema": "student",
+      "description": "List of authorized student emails."
+    },
+    "/teachers/{email}": {
+      "schema": "teacher",
+      "description": "List of authorized teacher/admin emails."
+    },
+    "/progress/{userId}": {
+      "schema": "userProgress",
+      "description": "User specific progress data."
+    },
+    "/file_contents/{fileId}": {
+      "description": "Binary file contents stored as base64 for persistent fallback."
+    }
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

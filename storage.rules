@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isTeacher() {
+      return request.auth != null && (
+        request.auth.token.email == 'sole.petetta@gmail.com' || 
+        request.auth.token.email == 'capacitaciones@fundacioncrucianelli.com'
+      );
+    }
+
+    match /{allPaths=**} {
+      // Permitir lectura a todos los usuarios autenticados
+      allow read: if request.auth != null;
+      // Solo permitir subida/modificación a docentes
+      allow write: if isTeacher();
+    }
+  }
+}
