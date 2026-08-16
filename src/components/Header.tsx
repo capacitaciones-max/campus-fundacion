@@ -87,32 +87,46 @@ export default function Header() {
     };
   }, []);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (isLoggingIn) return;
     
     setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
     
-    // Llamar a signInWithPopup sincrónicamente dentro del evento de clic para evitar bloqueo de popups en iOS/Safari
-    signInWithPopup(auth, provider)
-      .then(() => {
-        setIsLoggingIn(false);
-      })
-      .catch((error: any) => {
-        console.warn("Popup login failed:", error);
-        if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
-          setIsLoggingIn(false);
-          return;
-        }
+    // Detectar iOS o dispositivos móviles donde los popups de Firebase suelen fallar siempre
+    const isMobileOrIOS = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-        // Si el popup fue bloqueado o falló, intentar redirect como alternativa
-        console.log("Intentando signInWithRedirect como respaldo...");
-        signInWithRedirect(auth, provider).catch((redirectError: any) => {
-          console.error("Redirect login error:", redirectError);
-          setIsLoggingIn(false);
-          alert("Tu navegador bloqueó la ventana de inicio de sesión. Por favor, verifica que las ventanas emergentes estén permitidas en Safari o prueba abriendo el enlace en una pestaña nueva.");
-        });
-      });
+    if (isMobileOrIOS) {
+      console.log("Dispositivo móvil detectado. Usando signInWithRedirect directamente...");
+      try {
+        await signInWithRedirect(auth, provider);
+      } catch (error: any) {
+        console.error("Redirect login error:", error);
+        setIsLoggingIn(false);
+        alert("No se pudo iniciar sesión. Por favor, asegúrate de no estar en navegación privada y permite las cookies en Safari.");
+      }
+      return;
+    }
+
+    try {
+      await signInWithPopup(auth, provider);
+      setIsLoggingIn(false);
+    } catch (error: any) {
+      console.warn("Popup login failed:", error);
+      if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+        setIsLoggingIn(false);
+        return;
+      }
+
+      console.log("Intentando signInWithRedirect como respaldo...");
+      try {
+        await signInWithRedirect(auth, provider);
+      } catch (redirectError: any) {
+        console.error("Redirect login error:", redirectError);
+        setIsLoggingIn(false);
+        alert("Tu navegador bloqueó la ventana de inicio de sesión. Por favor, verifica que las ventanas emergentes estén permitidas.");
+      }
+    }
   };
 
   const handleLogout = async () => {
