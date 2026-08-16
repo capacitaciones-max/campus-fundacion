@@ -2,7 +2,7 @@
 import { motion } from 'motion/react';
 import { LogIn, LogOut, User, Users, ShieldCheck, Crown, Bell } from 'lucide-react';
 import { auth, checkTeacherStatus, isPrimaryAdmin, db } from '../lib/firebase';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, getDocFromServer, getDocFromCache, setDoc, serverTimestamp } from 'firebase/firestore';
 import StudentManager from './StudentManager';
@@ -17,11 +17,6 @@ export default function Header() {
 
   useEffect(() => {
     let unsubRequests: (() => void) | null = null;
-
-    // Procesar resultado de redirección si se usó signInWithRedirect en móviles
-    getRedirectResult(auth).catch((err) => {
-      console.warn("Redirect result error:", err);
-    });
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
@@ -91,41 +86,16 @@ export default function Header() {
     if (isLoggingIn) return;
     
     setIsLoggingIn(true);
-    const provider = new GoogleAuthProvider();
-    
-    // Detectar iOS o dispositivos móviles donde los popups de Firebase suelen fallar siempre
-    const isMobileOrIOS = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-    if (isMobileOrIOS) {
-      console.log("Dispositivo móvil detectado. Usando signInWithRedirect directamente...");
-      try {
-        await signInWithRedirect(auth, provider);
-      } catch (error: any) {
-        console.error("Redirect login error:", error);
-        setIsLoggingIn(false);
-        alert("No se pudo iniciar sesión. Por favor, asegúrate de no estar en navegación privada y permite las cookies en Safari.");
-      }
-      return;
-    }
-
     try {
+      const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-      setIsLoggingIn(false);
     } catch (error: any) {
       console.warn("Popup login failed:", error);
-      if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
-        setIsLoggingIn(false);
-        return;
+      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+        alert("No se pudo iniciar sesión con Google. Por favor, intenta de nuevo.");
       }
-
-      console.log("Intentando signInWithRedirect como respaldo...");
-      try {
-        await signInWithRedirect(auth, provider);
-      } catch (redirectError: any) {
-        console.error("Redirect login error:", redirectError);
-        setIsLoggingIn(false);
-        alert("Tu navegador bloqueó la ventana de inicio de sesión. Por favor, verifica que las ventanas emergentes estén permitidas.");
-      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
