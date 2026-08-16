@@ -2,11 +2,10 @@
 import { motion } from 'motion/react';
 import { LogIn, LogOut, User, Users, ShieldCheck, Crown, Bell } from 'lucide-react';
 import { auth, checkTeacherStatus, isPrimaryAdmin, db } from '../lib/firebase';
-import { signInWithPopup, signInWithCredential, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, getDocFromServer, getDocFromCache, setDoc, serverTimestamp } from 'firebase/firestore';
 import StudentManager from './StudentManager';
-import firebaseConfig from '../../firebase-applet-config.json';
 
 export default function Header() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -17,6 +16,11 @@ export default function Header() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
+    // Procesar resultado de redirección al cargar la app en iOS/móviles
+    getRedirectResult(auth).catch((err) => {
+      console.warn("Redirect result error:", err);
+    });
+
     let unsubRequests: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -83,59 +87,41 @@ export default function Header() {
     };
   }, []);
 
-  const fallbackPopupLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      console.warn("Popup login failed:", error);
-      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
-        alert("No se pudo iniciar sesión con Google. Por favor, asegúrate de permitir las ventanas emergentes en Safari.");
-      }
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
   const handleLogin = async () => {
     if (isLoggingIn) return;
     
     setIsLoggingIn(true);
-    
-    const google = (window as any).google;
-    if (google?.accounts?.oauth2 && firebaseConfig.oAuthClientId) {
+    const provider = new GoogleAuthProvider();
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
       try {
-        const tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: firebaseConfig.oAuthClientId,
-          scope: 'email profile openid',
-          callback: async (response: any) => {
-            if (response.access_token) {
-              try {
-                const credential = GoogleAuthProvider.credential(null, response.access_token);
-                await signInWithCredential(auth, credential);
-              } catch (credError) {
-                console.error("Firebase signInWithCredential error:", credError);
-                alert("Error al autenticar con Firebase.");
-              } finally {
-                setIsLoggingIn(false);
-              }
-            } else {
-              setIsLoggingIn(false);
-            }
-          },
-          error_callback: (err: any) => {
-            console.warn("GIS token client error, falling back to popup:", err);
-            fallbackPopupLogin();
-          }
-        });
-        tokenClient.requestAccessToken();
-        return;
-      } catch (gisError) {
-        console.warn("GIS init error, falling back to popup:", gisError);
+        await signInWithRedirect(auth, provider);
+      } catch (redirectError) {
+        console.error("Redirect login error:", redirectError);
+        setIsLoggingIn(false);
+        alert("No se pudo iniciar sesión. Asegúrate de abrir en Safari y permitir cookies.");
       }
+      return;
     }
 
-    await fallbackPopupLogin();
+    try {
+      await signInWithPopup(auth, provider);
+      setIsLoggingIn(false);
+    } catch (error: any) {
+      console.warn("Popup login failed:", error);
+      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+        try {
+          await signInWithRedirect(auth, provider);
+        } catch (redirectErr) {
+          console.error("Redirect fallback error:", redirectErr);
+          setIsLoggingIn(false);
+          alert("No se pudo iniciar sesión con Google.");
+        }
+      } else {
+        setIsLoggingIn(false);
+      }
+    }
   };
 
   const handleLogout = async () => {
