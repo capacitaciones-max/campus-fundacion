@@ -14,29 +14,8 @@ export default function Header() {
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [isStudentManagerOpen, setIsStudentManagerOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [manualEmailInput, setManualEmailInput] = useState('');
 
   useEffect(() => {
-    // Check manual session stored for iPhone/Safari fallback
-    const savedEmail = localStorage.getItem('campus_manual_email');
-    if (savedEmail) {
-      const mockUser = {
-        uid: 'manual_' + savedEmail,
-        email: savedEmail,
-        displayName: savedEmail === 'capacitaciones@fundacioncrucianelli.com' ? 'Capacitaciones Fundación' : 'Sole Petetta',
-        photoURL: null,
-        emailVerified: true,
-        isAnonymous: false,
-        tenantId: null,
-        providerData: [],
-      } as unknown as FirebaseUser;
-      setUser(mockUser);
-      const adminStatus = isPrimaryAdmin(savedEmail);
-      setIsAdmin(adminStatus);
-      setIsTeacher(true);
-    }
-
     // Procesar resultado de redirección al cargar la app en iOS/móviles
     getRedirectResult(auth).catch((err) => {
       console.warn("Redirect result error:", err);
@@ -45,16 +24,11 @@ export default function Header() {
     let unsubRequests: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (!localStorage.getItem('campus_manual_email')) {
-        setUser(u);
-      }
-      const activeUser = u || (localStorage.getItem('campus_manual_email') ? { email: localStorage.getItem('campus_manual_email') } as any : null);
-      
-      if (activeUser?.email) {
-        const emailVal = activeUser.email;
-        const adminStatus = isPrimaryAdmin(emailVal);
+      setUser(u);
+      if (u?.email) {
+        const adminStatus = isPrimaryAdmin(u.email);
         setIsAdmin(adminStatus);
-        const teacherStatus = await checkTeacherStatus(emailVal);
+        const teacherStatus = await checkTeacherStatus(u.email);
         setIsTeacher(teacherStatus || adminStatus);
 
         // Si es Administrador, escuchar solicitudes pendientes
@@ -65,13 +39,41 @@ export default function Header() {
           }, (err) => {
             console.error("Error listening to requests count:", err);
           });
+        } else if (!teacherStatus) {
+          // Si es un usuario regular, verificar si es alumno o registrar solicitud automáticamente
+          const emailLower = u.email.toLowerCase();
+          const isDomainCrucianelli = emailLower.endsWith('@crucianelli.com') || emailLower.endsWith('@fundacioncrucianelli.com');
+          
+          if (!isDomainCrucianelli) {
+            try {
+              let isStudent = false;
+              try {
+                const sDoc = await getDocFromServer(doc(db, 'students', emailLower));
+                isStudent = sDoc.exists();
+              } catch {
+                const cDoc = await getDocFromCache(doc(db, 'students', emailLower));
+                isStudent = cDoc.exists();
+              }
+
+              if (!isStudent) {
+                // Registrar o actualizar solicitud en access_requests para que el admin la vea
+                await setDoc(doc(db, 'access_requests', emailLower), {
+                  email: emailLower,
+                  name: u.displayName || null,
+                  photoURL: u.photoURL || null,
+                  requestedAt: serverTimestamp(),
+                  status: 'pending'
+                }, { merge: true });
+              }
+            } catch (e) {
+              console.error("Error al registrar solicitud de acceso:", e);
+            }
+          }
         }
       } else {
-        if (!localStorage.getItem('campus_manual_email')) {
-          setIsAdmin(false);
-          setIsTeacher(false);
-          setPendingRequestsCount(0);
-        }
+        setIsAdmin(false);
+        setIsTeacher(false);
+        setPendingRequestsCount(0);
         if (unsubRequests) {
           unsubRequests();
           unsubRequests = null;
@@ -85,39 +87,23 @@ export default function Header() {
     };
   }, []);
 
-  const handleManualLogin = (email: string) => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) return;
-    localStorage.setItem('campus_manual_email', trimmed);
-    const mockUser = {
-      uid: 'manual_' + trimmed,
-      email: trimmed,
-      displayName: trimmed === 'capacitaciones@fundacioncrucianelli.com' ? 'Capacitaciones Fundación' : 'Docente Autorizado',
-      photoURL: null,
-      emailVerified: true,
-      isAnonymous: false,
-      tenantId: null,
-      providerData: [],
-    } as unknown as FirebaseUser;
-    setUser(mockUser);
-    const adminStatus = isPrimaryAdmin(trimmed);
-    setIsAdmin(adminStatus);
-    setIsTeacher(true);
-    setIsManualModalOpen(false);
-  };
-
   const handleLogin = async () => {
     if (isLoggingIn) return;
     
-    // Check if it's iOS Safari where redirect result is often lost due to ITP
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (isIOS) {
-      setIsManualModalOpen(true);
-      return;
-    }
-
     setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+      try {
+        await signInWithRedirect(auth, provider);
+      } catch (redirectError) {
+        console.error("Redirect login error:", redirectError);
+        setIsLoggingIn(false);
+        alert("No se pudo iniciar sesión. Asegúrate de abrir en Safari y permitir cookies.");
+      }
+      return;
+    }
 
     try {
       await signInWithPopup(auth, provider);
@@ -130,7 +116,7 @@ export default function Header() {
         } catch (redirectErr) {
           console.error("Redirect fallback error:", redirectErr);
           setIsLoggingIn(false);
-          setIsManualModalOpen(true);
+          alert("No se pudo iniciar sesión con Google.");
         }
       } else {
         setIsLoggingIn(false);
@@ -139,11 +125,7 @@ export default function Header() {
   };
 
   const handleLogout = async () => {
-    localStorage.removeItem('campus_manual_email');
     await signOut(auth);
-    setUser(null);
-    setIsAdmin(false);
-    setIsTeacher(false);
   };
 
   return (
@@ -227,69 +209,6 @@ export default function Header() {
         isOpen={isStudentManagerOpen} 
         onClose={() => setIsStudentManagerOpen(false)} 
       />
-
-      {isManualModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100">
-            <h3 className="text-lg font-black text-[#000033] mb-2">Acceso Rápido en iPhone (Safari)</h3>
-            <p className="text-xs text-gray-600 mb-4">
-              Debido a las restricciones de seguridad y bloqueo de almacenamiento cruzado de Safari en iOS, puedes iniciar sesión instantáneamente seleccionando tu correo autorizado:
-            </p>
-
-            <div className="space-y-2 mb-4">
-              <button
-                onClick={() => handleManualLogin('capacitaciones@fundacioncrucianelli.com')}
-                className="w-full text-left px-4 py-3 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition-all cursor-pointer flex items-center justify-between"
-              >
-                <div>
-                  <p className="text-xs font-bold text-[#000033]">capacitaciones@fundacioncrucianelli.com</p>
-                  <p className="text-[10px] text-red-600 font-semibold">Administrador / Fundación</p>
-                </div>
-                <span className="text-xs font-bold text-[#e31b23]">Ingresar →</span>
-              </button>
-
-              <button
-                onClick={() => handleManualLogin('sole.petetta@gmail.com')}
-                className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-all cursor-pointer flex items-center justify-between"
-              >
-                <div>
-                  <p className="text-xs font-bold text-[#000033]">sole.petetta@gmail.com</p>
-                  <p className="text-[10px] text-gray-500 font-semibold">Administrador / Docente</p>
-                </div>
-                <span className="text-xs font-bold text-[#000033]">Ingresar →</span>
-              </button>
-            </div>
-
-            <div className="border-t border-gray-100 pt-4">
-              <label className="block text-[11px] font-bold text-gray-700 mb-1">O ingresa otro correo autorizado:</label>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  placeholder="correo@ejemplo.com"
-                  value={manualEmailInput}
-                  onChange={(e) => setManualEmailInput(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-xl focus:outline-hidden focus:border-[#000033]"
-                />
-                <button
-                  onClick={() => handleManualLogin(manualEmailInput)}
-                  className="px-4 py-2 bg-[#000033] text-white text-xs font-bold rounded-xl hover:bg-[#000044] cursor-pointer"
-                >
-                  Acceder
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-6 text-right">
-              <button
-                onClick={() => setIsManualModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </header>
   );
 }
