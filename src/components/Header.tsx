@@ -92,19 +92,28 @@ export default function Header() {
     
     setIsLoggingIn(true);
     try {
+      // Detectar si es iOS (iPhone / iPad / iPod) para usar redirect directo ya que Safari bloquea popups frecuentemente
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      
       const provider = new GoogleAuthProvider();
+      if (isIOS) {
+        console.log("Detectado iOS. Usando signInWithRedirect directamente...");
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       if (error.code === 'auth/cancelled-popup-request') {
         console.log("Login popup cancelled by user or another request.");
       } else {
-        console.warn("Popup login failed, attempting redirect login for mobile compatibility...", error);
+        console.warn("Popup login failed, attempting redirect login...", error);
         try {
           const provider = new GoogleAuthProvider();
           await signInWithRedirect(auth, provider);
         } catch (redirectError: any) {
           console.error("Redirect login error:", redirectError);
-          alert("No se pudo iniciar sesión. Si estás abriendo el enlace desde WhatsApp o Instagram, por favor ábrelo en Safari (tocando el menú ⋯ o el ícono de brújula) para iniciar sesión correctamente.");
+          alert("No se pudo iniciar sesión. Por favor, asegúrate de abrir este enlace en el navegador Safari y no dentro de apps de mensajería.");
         }
       }
     } finally {
