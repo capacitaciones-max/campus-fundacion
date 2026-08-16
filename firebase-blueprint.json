@@ -49,6 +49,19 @@
       },
       "required": ["email"]
     },
+    "accessRequest": {
+      "title": "Access Request",
+      "description": "Pending student or user access request.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" }
+      },
+      "required": ["email"]
+    },
     "teacher": {
       "title": "Teacher",
       "description": "An authorized teacher or instructor email.",
@@ -89,6 +102,10 @@
     "/students/{email}": {
       "schema": "student",
       "description": "List of authorized student emails."
+    },
+    "/access_requests/{email}": {
+      "schema": "accessRequest",
+      "description": "Pending requests for course and module access."
     },
     "/teachers/{email}": {
       "schema": "teacher",

@@ -24,6 +24,14 @@ export interface ForumPost {
   createdAt: string;
 }
 
+export interface AccessRequest {
+  email: string;
+  name?: string;
+  photoURL?: string;
+  requestedAt?: any;
+  status?: 'pending' | 'approved' | 'rejected';
+}
+
 export interface Student {
   email: string;
   name?: string;

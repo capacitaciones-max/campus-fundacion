@@ -13,7 +13,9 @@ import {
   ExternalLink,
   Trash2,
   Image,
-  LogIn
+  LogIn,
+  Clock,
+  RefreshCw
 } from 'lucide-react';
 import { LearningModule, ModuleFile, FileType } from '../types';
 import { auth, db, storage, handleFirestoreError, OperationType, checkTeacherStatus } from '../lib/firebase';
@@ -27,7 +29,9 @@ import {
   orderBy, 
   deleteDoc, 
   doc,
-  getDocFromServer
+  getDocFromServer,
+  setDoc,
+  serverTimestamp
 } from 'firebase/firestore';
 import { ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
@@ -50,34 +54,65 @@ export default function ModuleDetails({ module, onBack, isCompleted, onToggleCom
   const [isDeleting, setIsDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Monitorear estado de autenticación
+  // Monitorear estado de autenticación y autorización en tiempo real
   useEffect(() => {
+    let unsubStudentDoc: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
-      const teacherStatus = await checkTeacherStatus(user?.email);
+      if (!user?.email) {
+        setIsTeacher(false);
+        setIsAuthorizedStudent(false);
+        if (unsubStudentDoc) {
+          unsubStudentDoc();
+          unsubStudentDoc = null;
+        }
+        return;
+      }
+
+      const teacherStatus = await checkTeacherStatus(user.email);
       setIsTeacher(teacherStatus);
       
-      if (user?.email && !teacherStatus) {
-        // Verificar si es un alumno autorizado (por dominio crucianelli o registrado en lista)
-        const emailLower = user.email.toLowerCase();
-        if (emailLower.endsWith('@crucianelli.com') || emailLower.endsWith('@fundacioncrucianelli.com')) {
+      if (teacherStatus) {
+        setIsAuthorizedStudent(true);
+        return;
+      }
+
+      const emailLower = user.email.toLowerCase();
+      // Si pertenece al dominio de la fundación / empresa
+      if (emailLower.endsWith('@crucianelli.com') || emailLower.endsWith('@fundacioncrucianelli.com')) {
+        setIsAuthorizedStudent(true);
+        return;
+      }
+
+      // Suscripción en tiempo real a la colección de alumnos para que al ser aprobado se desbloquee al instante
+      unsubStudentDoc = onSnapshot(doc(db, 'students', emailLower), async (docSnap) => {
+        if (docSnap.exists()) {
           setIsAuthorizedStudent(true);
         } else {
+          setIsAuthorizedStudent(false);
+          // Registrar automáticamente la solicitud pendiente
           try {
-            const studentDoc = await getDocFromServer(doc(db, 'students', emailLower));
-            setIsAuthorizedStudent(studentDoc.exists());
-          } catch (error) {
-            console.error("Error verificando autorización de alumno:", error);
-            setIsAuthorizedStudent(false);
+            await setDoc(doc(db, 'access_requests', emailLower), {
+              email: emailLower,
+              name: user.displayName || null,
+              photoURL: user.photoURL || null,
+              requestedAt: serverTimestamp(),
+              status: 'pending'
+            }, { merge: true });
+          } catch (err) {
+            console.error("Error al registrar solicitud de acceso:", err);
           }
         }
-      } else if (teacherStatus) {
-        setIsAuthorizedStudent(true);
-      } else {
-        setIsAuthorizedStudent(false);
-      }
+      }, (error) => {
+        console.error("Error verificando autorización de alumno:", error);
+      });
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      if (unsubStudentDoc) unsubStudentDoc();
+    };
   }, []);
 
   // Cargar archivos del módulo en tiempo real
@@ -378,16 +413,44 @@ export default function ModuleDetails({ module, onBack, isCompleted, onToggleCom
                 </div>
               </div>
             ) : (!isTeacher && !isAuthorizedStudent) ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-                <div className="p-6 bg-red-50 rounded-full">
-                  <AlertCircle className="w-12 h-12 text-[#e31b23]" />
+              <div className="flex flex-col items-center justify-center py-16 text-center space-y-4 max-w-lg mx-auto">
+                <div className="p-5 bg-amber-50 rounded-2xl border border-amber-200">
+                  <Clock className="w-12 h-12 text-amber-600 animate-pulse" />
                 </div>
                 <div>
-                  <h4 className="text-xl font-bold text-gray-800">Acceso no autorizado</h4>
-                  <p className="text-gray-500 max-w-md mx-auto mt-2">
-                    Tu correo <span className="font-bold text-gray-700">{currentUser.email}</span> no está en la lista de alumnos autorizados. 
-                    Por favor, contacta con los docentes para solicitar acceso.
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-black uppercase tracking-wider mb-2">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Esperando Aprobación</span>
+                  </div>
+                  <h4 className="text-2xl font-black text-[#000033]">Solicitud de Acceso Enviada</h4>
+                  <p className="text-gray-600 text-sm mt-3 leading-relaxed">
+                    Hola <span className="font-bold text-gray-900">{currentUser.displayName || currentUser.email}</span>. Tu cuenta quedó registrada automáticamente en la lista de espera para el administrador.
                   </p>
+                  <p className="text-gray-500 text-xs mt-2 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                    En cuanto el Administrador de la Fundación Crucianelli acepte tu solicitud, el contenido de este módulo y los materiales educativos se desbloquearán de forma instantánea.
+                  </p>
+                </div>
+                <div className="pt-2">
+                  <button
+                    onClick={async () => {
+                      if (!currentUser?.email) return;
+                      const emailLower = currentUser.email.toLowerCase();
+                      try {
+                        const sDoc = await getDocFromServer(doc(db, 'students', emailLower));
+                        if (sDoc.exists()) {
+                          setIsAuthorizedStudent(true);
+                        } else {
+                          alert("Tu solicitud todavía está pendiente de aprobación por el Administrador.");
+                        }
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 hover:border-gray-300 text-gray-700 text-xs font-bold rounded-xl shadow-2xs hover:bg-gray-50 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Comprobar Estado</span>
+                  </button>
                 </div>
               </div>
             ) : files.length > 0 ? (

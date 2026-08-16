@@ -1,19 +1,23 @@
 
 import { motion } from 'motion/react';
-import { LogIn, LogOut, User, Users, ShieldCheck, Crown } from 'lucide-react';
-import { auth, checkTeacherStatus, isPrimaryAdmin } from '../lib/firebase';
+import { LogIn, LogOut, User, Users, ShieldCheck, Crown, Bell } from 'lucide-react';
+import { auth, checkTeacherStatus, isPrimaryAdmin, db } from '../lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { useState, useEffect } from 'react';
+import { collection, query, onSnapshot, doc, getDocFromServer, getDocFromCache, setDoc, serverTimestamp } from 'firebase/firestore';
 import StudentManager from './StudentManager';
 
 export default function Header() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isTeacher, setIsTeacher] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [isStudentManagerOpen, setIsStudentManagerOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
+    let unsubRequests: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u?.email) {
@@ -21,12 +25,61 @@ export default function Header() {
         setIsAdmin(adminStatus);
         const teacherStatus = await checkTeacherStatus(u.email);
         setIsTeacher(teacherStatus || adminStatus);
+
+        // Si es Administrador, escuchar solicitudes pendientes
+        if (adminStatus) {
+          const qReqs = query(collection(db, 'access_requests'));
+          unsubRequests = onSnapshot(qReqs, (snap) => {
+            setPendingRequestsCount(snap.docs.length);
+          }, (err) => {
+            console.error("Error listening to requests count:", err);
+          });
+        } else if (!teacherStatus) {
+          // Si es un usuario regular, verificar si es alumno o registrar solicitud automáticamente
+          const emailLower = u.email.toLowerCase();
+          const isDomainCrucianelli = emailLower.endsWith('@crucianelli.com') || emailLower.endsWith('@fundacioncrucianelli.com');
+          
+          if (!isDomainCrucianelli) {
+            try {
+              let isStudent = false;
+              try {
+                const sDoc = await getDocFromServer(doc(db, 'students', emailLower));
+                isStudent = sDoc.exists();
+              } catch {
+                const cDoc = await getDocFromCache(doc(db, 'students', emailLower));
+                isStudent = cDoc.exists();
+              }
+
+              if (!isStudent) {
+                // Registrar o actualizar solicitud en access_requests para que el admin la vea
+                await setDoc(doc(db, 'access_requests', emailLower), {
+                  email: emailLower,
+                  name: u.displayName || null,
+                  photoURL: u.photoURL || null,
+                  requestedAt: serverTimestamp(),
+                  status: 'pending'
+                }, { merge: true });
+              }
+            } catch (e) {
+              console.error("Error al registrar solicitud de acceso:", e);
+            }
+          }
+        }
       } else {
         setIsAdmin(false);
         setIsTeacher(false);
+        setPendingRequestsCount(0);
+        if (unsubRequests) {
+          unsubRequests();
+          unsubRequests = null;
+        }
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      if (unsubRequests) unsubRequests();
+    };
   }, []);
 
   const handleLogin = async () => {
@@ -81,11 +134,17 @@ export default function Header() {
                 {isAdmin && (
                   <button 
                     onClick={() => setIsStudentManagerOpen(true)}
-                    className="flex items-center px-4 py-2 bg-white border-2 border-[#000033] text-[#000033] text-xs font-black rounded-xl hover:bg-gray-50 transition-all gap-2 uppercase tracking-tight shadow-xs cursor-pointer"
+                    className="relative flex items-center px-4 py-2 bg-white border-2 border-[#000033] text-[#000033] text-xs font-black rounded-xl hover:bg-gray-50 transition-all gap-2 uppercase tracking-tight shadow-xs cursor-pointer"
                     title="Administración de Alumnos y Docentes (Solo Admins)"
                   >
                     <ShieldCheck className="w-4 h-4 text-[#e31b23]" />
                     <span>Usuarios & Accesos</span>
+                    {pendingRequestsCount > 0 && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-[#e31b23] text-white text-[10px] font-black rounded-full animate-pulse shadow-xs">
+                        <Bell className="w-2.5 h-2.5" />
+                        {pendingRequestsCount}
+                      </span>
+                    )}
                   </button>
                 )}
                 
