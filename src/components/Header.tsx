@@ -2,7 +2,7 @@
 import { motion } from 'motion/react';
 import { LogIn, LogOut, User, Users, ShieldCheck, Crown, Bell } from 'lucide-react';
 import { auth, checkTeacherStatus, isPrimaryAdmin, db } from '../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, getDocFromServer, getDocFromCache, setDoc, serverTimestamp } from 'firebase/firestore';
 import StudentManager from './StudentManager';
@@ -17,6 +17,11 @@ export default function Header() {
 
   useEffect(() => {
     let unsubRequests: (() => void) | null = null;
+
+    // Procesar resultado de redirección si se usó signInWithRedirect en móviles
+    getRedirectResult(auth).catch((err) => {
+      console.warn("Redirect result error:", err);
+    });
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
@@ -93,8 +98,14 @@ export default function Header() {
       if (error.code === 'auth/cancelled-popup-request') {
         console.log("Login popup cancelled by user or another request.");
       } else {
-        console.error("Error al iniciar sesión:", error);
-        alert("No se pudo iniciar sesión. Por favor, intenta de nuevo.");
+        console.warn("Popup login failed, attempting redirect login for mobile compatibility...", error);
+        try {
+          const provider = new GoogleAuthProvider();
+          await signInWithRedirect(auth, provider);
+        } catch (redirectError: any) {
+          console.error("Redirect login error:", redirectError);
+          alert("No se pudo iniciar sesión. Si estás abriendo el enlace desde WhatsApp o Instagram, por favor ábrelo en Safari (tocando el menú ⋯ o el ícono de brújula) para iniciar sesión correctamente.");
+        }
       }
     } finally {
       setIsLoggingIn(false);
