@@ -186,74 +186,105 @@ export default function ModuleDetails({ module, onBack, isCompleted, onToggleCom
         throw new Error("Permisos insuficientes.");
       }
 
-      console.log("Iniciando subida por trozos al servidor:", file.name, file.size);
-      
-      // Aumentamos el tamaño del trozo a 5MB para reducir la probabilidad de fragmentación
-      // y mejorar la velocidad en archivos medianos.
-      const CHUNK_SIZE = 5 * 1024 * 1024; 
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      let downloadUrl = '';
 
-      // 1. Subir chunks
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const chunk = file.slice(start, end);
+      // 1. INTENTO PRIMARIO: Subida directa a Firebase Storage (Compatible con Vercel y producción)
+      try {
+        console.log("Intentando subida directa a Firebase Storage:", file.name);
+        const timestamp = Date.now();
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const storagePath = `modules/${module.id}/${timestamp}_${safeName}`;
+        const storageRef = ref(storage, storagePath);
 
-        const formData = new FormData();
-        // IMPORTANTE: Los campos de texto deben ir ANTES del archivo para que Multer los procese correctamente
-        formData.append('uploadId', uploadId);
-        formData.append('chunkIndex', i.toString());
-        formData.append('totalChunks', totalChunks.toString());
-        formData.append('chunk', chunk, file.name); // Usamos el nombre real para ayudar al servidor
-
-        const response = await fetch('/api/upload/chunk', {
-          method: 'POST',
-          body: formData
-        }).catch(err => {
-          console.error(`Error de red en chunk ${i}:`, err);
-          throw new Error("Error de conexión al subir el archivo. Por favor, verifica tu internet.");
+        const uploadTask = uploadBytesResumable(storageRef, file, {
+          contentType: file.type,
+          customMetadata: {
+            uploadedBy: user.email || 'teacher',
+            moduleId: module.id
+          }
         });
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          console.error(`Error del servidor en chunk ${i}:`, errData);
-          throw new Error(errData.error || `El servidor rechazó el trozo ${i}.`);
-        }
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(Math.round(progress));
+            },
+            (error) => {
+              console.warn("Fallo en subida directa a Firebase Storage:", error);
+              reject(error);
+            },
+            async () => {
+              try {
+                downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve();
+              } catch (urlErr) {
+                reject(urlErr);
+              }
+            }
+          );
+        });
+
+        console.log("Subida directa a Firebase Storage exitosa:", downloadUrl);
+      } catch (storageErr) {
+        console.warn("Subida directa a Firebase Storage no disponible. Usando canal de subida alternativo...", storageErr);
         
-        const progress = ((i + 1) / totalChunks) * 80;
-        setUploadProgress(Math.round(progress));
+        // 2. INTENTO SECUNDARIO: Subida por chunks al servidor
+        const CHUNK_SIZE = 5 * 1024 * 1024; 
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+
+          const formData = new FormData();
+          formData.append('uploadId', uploadId);
+          formData.append('chunkIndex', i.toString());
+          formData.append('totalChunks', totalChunks.toString());
+          formData.append('chunk', chunk, file.name);
+
+          const response = await fetch('/api/upload/chunk', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `El servidor rechazó el trozo ${i}.`);
+          }
+          
+          const progress = ((i + 1) / totalChunks) * 80;
+          setUploadProgress(Math.round(progress));
+        }
+
+        await new Promise(r => setTimeout(r, 600));
+        setUploadProgress(85);
+
+        const completeRes = await fetch('/api/upload/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uploadId,
+            name: file.name,
+            mimeType: file.type,
+            totalChunks,
+            moduleId: module.id
+          })
+        });
+
+        if (!completeRes.ok) {
+          const errData = await completeRes.json().catch(() => ({}));
+          throw new Error(errData.error || "Error al finalizar la subida en el servidor.");
+        }
+
+        const resData = await completeRes.json();
+        downloadUrl = resData.url;
       }
 
-      // Pausa defensiva para asegurar que el sistema de archivos del servidor se asiente
-      await new Promise(r => setTimeout(r, 800));
-
-      // 2. Finalizar subida y persistir en Storage via Servidor
-      console.log("Chunks enviados, completando en servidor...");
-      setUploadProgress(85);
-
-      const completeRes = await fetch('/api/upload/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uploadId,
-          name: file.name,
-          mimeType: file.type,
-          totalChunks,
-          moduleId: module.id
-        })
-      });
-
-      if (!completeRes.ok) {
-        const errData = await completeRes.json().catch(() => ({}));
-        throw new Error(errData.error || "Error al finalizar la subida en el servidor.");
-      }
-
-      const resData = await completeRes.json();
-      const downloadUrl = resData.url;
       setUploadProgress(100);
-
-      console.log("Archivo persistido con éxito via servidor:", downloadUrl);
 
       // 3. Guardar metadatos en Firestore
       const fileData: Omit<ModuleFile, 'id'> = {
