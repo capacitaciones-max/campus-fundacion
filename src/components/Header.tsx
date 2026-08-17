@@ -2,7 +2,7 @@
 import { motion } from 'motion/react';
 import { LogIn, LogOut, User, Users, ShieldCheck, Crown, Bell } from 'lucide-react';
 import { auth, checkTeacherStatus, isPrimaryAdmin, db } from '../lib/firebase';
-import { signInWithRedirect, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, getDocFromServer, getDocFromCache, setDoc, serverTimestamp } from 'firebase/firestore';
 import StudentManager from './StudentManager';
@@ -16,6 +16,11 @@ export default function Header() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
+    // Procesar resultado de redirección para iOS / Safari
+    getRedirectResult(auth).catch((err) => {
+      console.warn("Redirect result error:", err);
+    });
+
     let unsubRequests: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -86,27 +91,23 @@ export default function Header() {
     if (isLoggingIn) return;
 
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const isInIframe = window.self !== window.top;
-
-    if (isIOS && isInIframe) {
-      const confirmOpen = window.confirm("Para iniciar sesión con Google en iPhone sin bloqueos de Safari, abre la aplicación en una pestaña nueva. ¿Deseas abrirla ahora?");
-      if (confirmOpen) {
-        window.open(window.location.href, '_blank');
-      }
-      return;
-    }
     
     setIsLoggingIn(true);
+    const provider = new GoogleAuthProvider();
+
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      if (isIOS) {
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider);
+        setIsLoggingIn(false);
+      }
     } catch (error: any) {
       console.warn("Login failed:", error);
-      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
-        alert("No se pudo iniciar sesión con Google. Si estás en iPhone, asegúrate de abrir la app directamente en Safari.");
-      }
-    } finally {
       setIsLoggingIn(false);
+      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+        alert("No se pudo iniciar sesión con Google. Por favor, intenta de nuevo.");
+      }
     }
   };
 
