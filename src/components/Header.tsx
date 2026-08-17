@@ -2,7 +2,7 @@
 import { motion } from 'motion/react';
 import { LogIn, LogOut, User, Users, ShieldCheck, Crown, Bell } from 'lucide-react';
 import { auth, checkTeacherStatus, isPrimaryAdmin, db } from '../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInWithRedirect, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, getDocFromServer, getDocFromCache, setDoc, serverTimestamp } from 'firebase/firestore';
 import StudentManager from './StudentManager';
