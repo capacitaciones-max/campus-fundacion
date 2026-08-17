@@ -94,6 +94,7 @@ export default function Header() {
     
     setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
 
     try {
       if (isIOS) {
